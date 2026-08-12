@@ -1,0 +1,52 @@
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+body {
+    background-color: #121212;
+    color: #ffffff;
+    font-family: Arial, sans-serif;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 100vh;
+}
+.container {
+    text-align: center;
+}
+h1 {
+    margin-bottom: 40px;
+    letter-spacing: 2px;
+}
+.torch-btn {
+    width: 120px;
+    height: 120px;
+    border-radius: 50%;
+    background: #222;
+    border: 4px solid #444;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    margin: 0 auto 20px;
+    cursor: pointer;
+    box-shadow: 0 0 15px rgba(0,0,0,0.5);
+    transition: all 0.3s ease;
+}
+.power-icon {
+    font-size: 50px;
+    color: #555;
+}
+.torch-btn.active {
+    background: #ffcc00;
+    border-color: #fff;
+    box-shadow: 0 0 30px #ffcc00;
+}
+.torch-btn.active .power-icon {
+    color: #fff;
+}
+#status {
+    font-size: 20px;
+    font-weight: bold;
+    color: #888;
+}
