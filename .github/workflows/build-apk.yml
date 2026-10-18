@@ -1,0 +1,56 @@
+name: Build APK
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'android/**'
+      - '.github/workflows/build-apk.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/setup-gradle@v3
+        with:
+          gradle-version: '8.7'
+
+      - name: Build release APK
+        shell: bash
+        working-directory: android
+        run: gradle --no-daemon --stacktrace assembleRelease 2>&1 | tee ../build.log
+
+      - name: Publish APK to a GitHub Release
+        if: success()
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cp android/app/build/outputs/apk/release/app-release.apk Torchlight.apk
+          TAG="v1.0.${{ github.run_number }}"
+          gh release create "$TAG" Torchlight.apk --title "Torchlight $TAG" --notes "Download Torchlight.apk, then install it on your Android phone (allow install from unknown sources)." --latest
+
+      - name: Save build error log (branch build-logs)
+        if: failure()
+        shell: bash
+        run: |
+          tail -n 150 build.log > /tmp/build-error.log 2>/dev/null || echo "no build log" > /tmp/build-error.log
+          git config user.name github-actions
+          git config user.email github-actions@users.noreply.github.com
+          git checkout --orphan build-logs
+          git rm -rf . -q
+          cp /tmp/build-error.log build-error.log
+          git add build-error.log
+          git commit -q -m "build log run ${{ github.run_number }}"
+          git push -f origin build-logs
