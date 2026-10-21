@@ -7,6 +7,8 @@ import android.content.Intent
 import android.app.PendingIntent
 import android.content.pm.PackageInstaller
 import android.graphics.Color
+import android.net.ConnectivityManager
+import android.net.Network
 import android.net.Uri
 import android.os.Build
 import java.net.HttpURLConnection
@@ -106,6 +108,13 @@ class MainActivity : Activity() {
     private var updBusy = false
     private var pendingInstall = false
 
+    // অফলাইনে খুলে পরে নেট এলে নিজে থেকে নতুন সংস্করণ খোঁজে
+    private val netCallback = object : ConnectivityManager.NetworkCallback() {
+        override fun onAvailable(network: Network) {
+            checkUpdate()
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
@@ -122,6 +131,10 @@ class MainActivity : Activity() {
             power.isEnabled = false
         }
         refreshUi()
+        try {
+            getSystemService(ConnectivityManager::class.java).registerDefaultNetworkCallback(netCallback)
+        } catch (e: Exception) {
+        }
     }
 
     override fun onResume() {
@@ -222,6 +235,10 @@ class MainActivity : Activity() {
     }
 
     override fun onDestroy() {
+        try {
+            getSystemService(ConnectivityManager::class.java).unregisterNetworkCallback(netCallback)
+        } catch (e: Exception) {
+        }
         handler.removeCallbacks(runner)
         if (cameraId != null) {
             try {
