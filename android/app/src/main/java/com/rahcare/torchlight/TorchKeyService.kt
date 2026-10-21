@@ -7,6 +7,7 @@ import android.hardware.camera2.CameraManager
 import android.media.AudioManager
 import android.os.Handler
 import android.os.Looper
+import android.os.PowerManager
 import android.view.KeyEvent
 import android.view.accessibility.AccessibilityEvent
 
@@ -20,6 +21,29 @@ class TorchKeyService : AccessibilityService() {
     private lateinit var cameraManager: CameraManager
     private var cameraId: String? = null
     private var torchOn = false
+
+    // স্ক্রিন অফ থাকলে ফোন CPU ঘুম পাড়ায়; তখন ০.৬ সেকেন্ডের টাইমার চলার আগেই বাটন ছাড়া হয়ে যায়।
+    // তাই বাটন চাপামাত্র অল্প সময়ের জন্য CPU জাগিয়ে রাখি এবং সময়টা ইভেন্টের নিজস্ব টাইমস্ট্যাম্প থেকেও মাপি।
+    private var wakeLock: PowerManager.WakeLock? = null
+
+    private fun hold() {
+        try {
+            if (wakeLock == null) {
+                wakeLock = (getSystemService(Context.POWER_SERVICE) as PowerManager)
+                    .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "torchlight:volkey")
+                wakeLock?.setReferenceCounted(false)
+            }
+            wakeLock?.acquire(3000L)
+        } catch (e: Exception) {
+        }
+    }
+
+    private fun unhold() {
+        try {
+            if (wakeLock?.isHeld == true) wakeLock?.release()
+        } catch (e: Exception) {
+        }
+    }
 
     private var pending = false
     private var longPressFired = false
@@ -57,19 +81,28 @@ class TorchKeyService : AccessibilityService() {
 
         when (event.action) {
             KeyEvent.ACTION_DOWN -> {
-                // বাটন ধরে রাখলে একই ডাউন ইভেন্ট বারবার আসে — শুধু প্রথমটা গণনা করি
+                hold()
                 if (!pending) {
                     pending = true
                     longPressFired = false
                     handler.postDelayed(longPress, LONG_PRESS_MS)
+                } else if (!longPressFired && event.eventTime - event.downTime >= LONG_PRESS_MS) {
+                    // ধরে রাখলে একই ডাউন ইভেন্ট বারবার আসে; টাইমার দেরি করলেও এখানে ধরা পড়ে
+                    handler.removeCallbacks(longPress)
+                    longPress.run()
                 }
                 return true
             }
             KeyEvent.ACTION_UP -> {
-                val wasLong = longPressFired
                 handler.removeCallbacks(longPress)
+                // টাইমার না চললেও, বাটন ০.৬ সেকেন্ডের বেশি ধরা ছিল কি না ইভেন্টের সময় থেকে বুঝে নিই
+                if (!longPressFired && event.eventTime - event.downTime >= LONG_PRESS_MS) {
+                    longPress.run()
+                }
+                val wasLong = longPressFired
                 pending = false
                 longPressFired = false
+                unhold()
                 if (!wasLong) lowerVolume()
                 return true
             }
@@ -82,6 +115,7 @@ class TorchKeyService : AccessibilityService() {
     override fun onInterrupt() {
         handler.removeCallbacks(longPress)
         pending = false
+        unhold()
     }
 
     private fun lowerVolume() {

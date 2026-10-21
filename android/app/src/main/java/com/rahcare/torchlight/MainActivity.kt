@@ -139,6 +139,11 @@ class MainActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
+        // অ্যাপ তালিকা/App info থেকে ফিরলে Restricted settings-এর ধাপ শেষ: চিহ্ন মুছে একবার Accessibility পাতা আবার খুলে দেয়
+        if ((stateSp().getString("info_for", "") ?: "").isNotEmpty()) {
+            stateSp().edit().remove("info_for").remove("try_a11y").apply()
+            if (!isKeyServiceEnabled()) startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+        }
         // "অজানা সোর্স" অনুমতি দিয়ে ফিরে এলে আপডেট নিজেই শুরু হয়
         val u = update
         if (pendingInstall && u != null && packageManager.canRequestPackageInstalls()) {
@@ -225,6 +230,8 @@ class MainActivity : Activity() {
             }
         }.start()
     }
+
+    private fun stateSp() = getSharedPreferences("state", Context.MODE_PRIVATE)
 
     private fun isKeyServiceEnabled(): Boolean {
         val enabled = Settings.Secure.getString(
@@ -376,12 +383,26 @@ class MainActivity : Activity() {
         hint.isClickable = true
         hint.setOnClickListener {
             if (!isKeyServiceEnabled()) {
-                startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
-                Toast.makeText(
-                    this,
-                    "\"টর্চলাইট ভলিউম বাটন\" খুঁজে চালু করুন",
-                    Toast.LENGTH_LONG
-                ).show()
+                if (stateSp().getBoolean("try_a11y", false)) {
+                    // ধাপ ২: ফোন ব্লক করে রেখেছে — অ্যাপ তালিকা খুলে দেয়; সেখান থেকে ⋮ → Allow restricted settings;
+                    // ফিরে এলে অ্যাপ নিজে আবার Accessibility পাতা খুলে দেয় (onResume দেখুন)
+                    stateSp().edit().putString("info_for", "a11y").apply()
+                    Toast.makeText(
+                        this,
+                        "তালিকায় \"Torchlight\" খুঁজে চাপুন, ওপরে ডানে ⋮ চেপে \"Allow restricted settings\" দিন, তারপর ফিরে আসুন",
+                        Toast.LENGTH_LONG
+                    ).show()
+                    try {
+                        startActivity(Intent(Settings.ACTION_MANAGE_ALL_APPLICATIONS_SETTINGS))
+                    } catch (e: Exception) {
+                        startActivity(Intent(Settings.ACTION_MANAGE_APPLICATIONS_SETTINGS))
+                    }
+                } else {
+                    // ধাপ ১: প্রথম চাপে সরাসরি Accessibility সেটিংস
+                    stateSp().edit().putBoolean("try_a11y", true).apply()
+                    startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+                    Toast.makeText(this, "\"টর্চলাইট ভলিউম বাটন\" খুঁজে চালু করুন", Toast.LENGTH_LONG).show()
+                }
             }
         }
         val hl = LinearLayout.LayoutParams(matchParent, wrapContent)
@@ -423,11 +444,13 @@ class MainActivity : Activity() {
         }
 
         if (isKeyServiceEnabled()) {
+            stateSp().edit().remove("try_a11y").apply()
             hint.text = "ভলিউম-ডাউন চেপে ধরলে টর্চ অন/অফ হবে ✓"
             hint.setTextColor(Color.parseColor("#8A97A8"))
             hint.background = null
         } else {
-            hint.text = "ভলিউম-ডাউন চেপে ধরে টর্চ চালাতে এখানে চাপ দিয়ে ফিচারটি চালু করুন"
+            hint.text = if (stateSp().getBoolean("try_a11y", false)) "Restricted settings অনুমতি দিন"
+            else "ভলিউম-ডাউন চেপে ধরে টর্চ চালাতে এখানে চাপ দিয়ে ফিচারটি চালু করুন"
             hint.setTextColor(amber)
             hint.background = roundRect(Color.parseColor("#1B2430"), 12)
         }

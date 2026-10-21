@@ -7,6 +7,9 @@
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <uses-permission android:name="android.permission.UPDATE_PACKAGES_WITHOUT_USER_ACTION" />
 
+    <!-- স্ক্রিন অফ থাকলেও ভলিউম বাটনের চেপে-ধরা ঠিকমতো মাপতে -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+
     <!-- ফ্ল্যাশ চালাতে ক্যামেরা পারমিশন লাগে না -->
     <uses-feature android:name="android.hardware.camera.flash" android:required="false" />
 
