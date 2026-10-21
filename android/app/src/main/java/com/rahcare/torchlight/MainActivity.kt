@@ -300,6 +300,14 @@ class MainActivity : Activity() {
         title.gravity = Gravity.CENTER
         root.addView(title, LinearLayout.LayoutParams(matchParent, wrapContent))
 
+        // বর্তমান সংস্করণ (আপডেট ঠিকমতো হলো কি না বোঝার জন্য)
+        val ver = TextView(this)
+        ver.text = "সংস্করণ ${Updater.curVer(this) - 100}"
+        ver.setTextColor(Color.parseColor("#5C6877"))
+        ver.textSize = 12f
+        ver.gravity = Gravity.CENTER
+        root.addView(ver, LinearLayout.LayoutParams(matchParent, wrapContent))
+
         root.addView(View(this), LinearLayout.LayoutParams(matchParent, 0, 1f))
 
         power = TextView(this)
