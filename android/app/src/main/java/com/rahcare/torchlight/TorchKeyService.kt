@@ -11,6 +11,10 @@ import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioManager
 import android.media.AudioTrack
+import android.media.VolumeProvider
+import android.media.session.MediaSession
+import android.media.session.PlaybackState
+import android.os.SystemClock
 import android.os.Handler
 import android.os.Looper
 import android.os.PowerManager
@@ -111,11 +115,89 @@ class TorchKeyService : AccessibilityService() {
         silentThread = null
     }
 
+    // স্ক্রিন অফে সিস্টেম ভলিউম বাটন আর অ্যাপের উইন্ডোতে পাঠায় না, পাঠায় সক্রিয় মিডিয়া সেশনে।
+    // তাই স্ক্রিন অফ থাকলে একটি মিডিয়া সেশন (রিমোট ভলিউম) চালু রাখি; ছাড়ার সময় ধরে রাখার সময় মেপে টর্চ টগল করি।
+    private var session: MediaSession? = null
+    private var mHeld = false
+    private var mFired = false
+    private var mDownAt = 0L
+    private var mLast = 0L
+
+    private fun diag(key: String) {
+        try {
+            val sp = getSharedPreferences("state", Context.MODE_PRIVATE)
+            sp.edit().putInt(key, sp.getInt(key, 0) + 1).apply()
+        } catch (e: Exception) {
+        }
+    }
+
+    private fun startSession() {
+        if (session != null) return
+        try {
+            val s = MediaSession(this, "torchlight")
+            s.setFlags(
+                MediaSession.FLAG_HANDLES_MEDIA_BUTTONS or MediaSession.FLAG_HANDLES_TRANSPORT_CONTROLS
+            )
+            s.setPlaybackState(
+                PlaybackState.Builder()
+                    .setActions(PlaybackState.ACTION_PLAY or PlaybackState.ACTION_PAUSE)
+                    .setState(PlaybackState.STATE_PLAYING, 0, 1f)
+                    .build()
+            )
+            val vp = object : VolumeProvider(VOLUME_CONTROL_RELATIVE, 100, 50) {
+                override fun onAdjustVolume(direction: Int) {
+                    onMediaVolume(direction)
+                }
+            }
+            s.setPlaybackToRemote(vp)
+            s.isActive = true
+            session = s
+        } catch (e: Exception) {
+            session = null
+        }
+    }
+
+    private fun stopSession() {
+        try {
+            session?.isActive = false
+            session?.release()
+        } catch (e: Exception) {
+        }
+        session = null
+        mHeld = false
+    }
+
+    // direction: -1 = ভলিউম ডাউন চাপা, 0 = বাটন ছাড়া
+    private fun onMediaVolume(direction: Int) {
+        diag("diag_media")
+        val now = SystemClock.uptimeMillis()
+        if (direction < 0) {
+            if (!mHeld || now - mLast > 1200) {
+                mHeld = true
+                mFired = false
+                mDownAt = now
+            } else if (!mFired && now - mDownAt >= LONG_PRESS_MS) {
+                mFired = true
+                toggleTorch()
+            }
+            mLast = now
+        } else if (direction == 0) {
+            if (mHeld) {
+                val dur = now - mDownAt
+                mHeld = false
+                if (!mFired) {
+                    if (dur >= LONG_PRESS_MS) toggleTorch() else lowerVolume()
+                }
+                mFired = false
+            }
+        }
+    }
+
     private val screenReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             when (intent?.action) {
-                Intent.ACTION_SCREEN_OFF -> startSilentAudio()
-                Intent.ACTION_SCREEN_ON, Intent.ACTION_USER_PRESENT -> stopSilentAudio()
+                Intent.ACTION_SCREEN_OFF -> { startSilentAudio(); startSession() }
+                Intent.ACTION_SCREEN_ON, Intent.ACTION_USER_PRESENT -> { stopSession(); stopSilentAudio() }
             }
         }
     }
@@ -156,11 +238,12 @@ class TorchKeyService : AccessibilityService() {
         }
         // সার্ভিস চালু হওয়ার সময় স্ক্রিন আগেই অফ থাকলে
         val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
-        if (!pm.isInteractive) startSilentAudio()
+        if (!pm.isInteractive) { startSilentAudio(); startSession() }
     }
 
     override fun onUnbind(intent: android.content.Intent?): Boolean {
         handler.removeCallbacks(longPress)
+        stopSession()
         stopSilentAudio()
         if (receiverRegistered) {
             try { unregisterReceiver(screenReceiver) } catch (e: Exception) {}
@@ -172,6 +255,7 @@ class TorchKeyService : AccessibilityService() {
 
     override fun onKeyEvent(event: KeyEvent): Boolean {
         if (event.keyCode != KeyEvent.KEYCODE_VOLUME_DOWN) return false
+        if (event.action == KeyEvent.ACTION_DOWN) diag("diag_a11y")
 
         when (event.action) {
             KeyEvent.ACTION_DOWN -> {

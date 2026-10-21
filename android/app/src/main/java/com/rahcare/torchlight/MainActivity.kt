@@ -103,6 +103,7 @@ class MainActivity : Activity() {
     }
 
     private lateinit var hint: TextView
+    private lateinit var ver: TextView
     private lateinit var updBtn: TextView
     private var update: Updater.Info? = null
     private var updBusy = false
@@ -325,7 +326,7 @@ class MainActivity : Activity() {
         root.addView(title, LinearLayout.LayoutParams(matchParent, wrapContent))
 
         // বর্তমান সংস্করণ (আপডেট ঠিকমতো হলো কি না বোঝার জন্য)
-        val ver = TextView(this)
+        ver = TextView(this)
         ver.text = "সংস্করণ ${Updater.curVer(this) - 100}"
         ver.setTextColor(Color.parseColor("#5C6877"))
         ver.textSize = 12f
@@ -428,6 +429,8 @@ class MainActivity : Activity() {
     }
 
     private fun refreshUi() {
+        val sp = stateSp()
+        ver.text = "সংস্করণ ${Updater.curVer(this) - 100} · বাটন-ইভেন্ট: সরাসরি ${sp.getInt("diag_a11y", 0)}, মিডিয়া ${sp.getInt("diag_media", 0)}"
         val amber = Color.parseColor("#FFB703")
         val bg = GradientDrawable()
         bg.shape = GradientDrawable.OVAL
