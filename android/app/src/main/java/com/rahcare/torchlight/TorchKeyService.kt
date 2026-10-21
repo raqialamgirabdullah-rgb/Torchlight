@@ -193,12 +193,35 @@ class TorchKeyService : AccessibilityService() {
         }
     }
 
+    private var screenOffAt = 0L
+
     private val screenReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             when (intent?.action) {
-                Intent.ACTION_SCREEN_OFF -> { startSilentAudio(); startSession() }
-                Intent.ACTION_SCREEN_ON, Intent.ACTION_USER_PRESENT -> { stopSession(); stopSilentAudio() }
+                Intent.ACTION_SCREEN_OFF -> {
+                    screenOffAt = SystemClock.uptimeMillis()
+                    startSilentAudio()
+                    startSession()
+                }
+                Intent.ACTION_SCREEN_ON -> {
+                    stopSession()
+                    stopSilentAudio()
+                    // স্ক্রিন অফ অবস্থায় টর্চ জ্বলছিল, আর পাওয়ার বাটনে স্ক্রিন জাগালে টর্চ নিভে যাবে
+                    // (০.৮ সেকেন্ডের মধ্যে হলে এটা স্ক্রিন বন্ধ করার সময়কার ঝামেলা ধরে নিয়ে বাদ দিই)
+                    if (torchOn && SystemClock.uptimeMillis() - screenOffAt > 800L) {
+                        turnTorchOff()
+                    }
+                }
+                Intent.ACTION_USER_PRESENT -> { stopSession(); stopSilentAudio() }
             }
+        }
+    }
+
+    private fun turnTorchOff() {
+        val id = cameraId ?: return
+        try {
+            cameraManager.setTorchMode(id, false)
+        } catch (e: Exception) {
         }
     }
     private var receiverRegistered = false
