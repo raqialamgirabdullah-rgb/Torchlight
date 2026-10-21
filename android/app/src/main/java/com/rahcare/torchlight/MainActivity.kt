@@ -1,7 +1,9 @@
 package com.rahcare.torchlight
 
 import android.app.Activity
+import android.content.ComponentName
 import android.content.Context
+import android.content.Intent
 import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
@@ -11,6 +13,7 @@ import android.hardware.camera2.CameraManager
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.provider.Settings
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
@@ -77,15 +80,21 @@ class MainActivity : Activity() {
         }
     }
 
-    // অন্য অ্যাপ/সিস্টেম টর্চ বন্ধ করলে বাটনও বন্ধ দেখাবে (শুধু স্থির মোডে)
+    // অন্য অ্যাপ/সিস্টেম/ভলিউম বাটন টর্চ অন-অফ করলে বাটনও মিলিয়ে দেখাবে (শুধু স্থির মোডে)
     private val torchCallback = object : CameraManager.TorchCallback() {
         override fun onTorchModeChanged(id: String, enabled: Boolean) {
-            if (id == cameraId && mode == Mode.STEADY && active && !enabled) {
+            if (id != cameraId || mode != Mode.STEADY) return
+            if (active && !enabled) {
                 active = false
+                refreshUi()
+            } else if (!active && enabled) {
+                active = true
                 refreshUi()
             }
         }
     }
+
+    private lateinit var hint: TextView
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -103,6 +112,19 @@ class MainActivity : Activity() {
             power.isEnabled = false
         }
         refreshUi()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        refreshUi()
+    }
+
+    private fun isKeyServiceEnabled(): Boolean {
+        val enabled = Settings.Secure.getString(
+            contentResolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES
+        ) ?: return false
+        val me = ComponentName(this, TorchKeyService::class.java).flattenToString()
+        return enabled.split(':').any { it.equals(me, ignoreCase = true) }
     }
 
     override fun onDestroy() {
@@ -228,6 +250,25 @@ class MainActivity : Activity() {
         }
         root.addView(row, LinearLayout.LayoutParams(matchParent, wrapContent))
 
+        hint = TextView(this)
+        hint.textSize = 14f
+        hint.gravity = Gravity.CENTER
+        hint.setPadding(dp(12), dp(14), dp(12), dp(14))
+        hint.isClickable = true
+        hint.setOnClickListener {
+            if (!isKeyServiceEnabled()) {
+                startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+                Toast.makeText(
+                    this,
+                    "\"টর্চলাইট ভলিউম বাটন\" খুঁজে চালু করুন",
+                    Toast.LENGTH_LONG
+                ).show()
+            }
+        }
+        val hl = LinearLayout.LayoutParams(matchParent, wrapContent)
+        hl.topMargin = dp(16)
+        root.addView(hint, hl)
+
         setContentView(root)
     }
 
@@ -245,6 +286,16 @@ class MainActivity : Activity() {
             cameraId == null -> "এই ডিভাইসে ফ্ল্যাশ পাওয়া যায়নি"
             active -> "টর্চ জ্বলছে — " + mode.label
             else -> "চালু করতে বাটনে চাপ দিন"
+        }
+
+        if (isKeyServiceEnabled()) {
+            hint.text = "ভলিউম-ডাউন চেপে ধরলে টর্চ অন/অফ হবে ✓"
+            hint.setTextColor(Color.parseColor("#8A97A8"))
+            hint.background = null
+        } else {
+            hint.text = "ভলিউম-ডাউন চেপে ধরে টর্চ চালাতে এখানে চাপ দিয়ে ফিচারটি চালু করুন"
+            hint.setTextColor(amber)
+            hint.background = roundRect(Color.parseColor("#1B2430"), 12)
         }
 
         for ((m, chip) in chips) {

@@ -1,3 +1,5 @@
 <resources>
     <string name="app_name">Torchlight</string>
+    <string name="a11y_label">টর্চলাইট ভলিউম বাটন</string>
+    <string name="a11y_description">ভলিউম-ডাউন বাটন চেপে ধরলে টর্চ অন/অফ করার জন্য। এটি স্ক্রিনের কোনো লেখা বা তথ্য পড়ে না।</string>
 </resources>
