@@ -4,7 +4,6 @@ import android.app.Activity
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
-import android.content.res.ColorStateList
 import android.app.PendingIntent
 import android.content.pm.PackageInstaller
 import android.graphics.Color
@@ -28,7 +27,6 @@ import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
 import android.widget.LinearLayout
-import android.widget.SeekBar
 import android.widget.TextView
 import android.widget.Toast
 
@@ -49,12 +47,6 @@ class MainActivity : Activity() {
     private var active = false
     private var mode = Mode.STEADY
     private var step = 0
-
-    // টর্চের (LED) আলোর মাত্রা: Android 13+ ও হার্ডওয়্যার সমর্থন থাকলে ১..maxStrength; maxStrength = 1 মানে সমর্থন নেই
-    private var maxStrength = 1
-    private var strength = 1
-    private lateinit var brightLabel: TextView
-    private lateinit var brightBar: SeekBar
 
     private lateinit var power: TextView
     private lateinit var status: TextView
@@ -133,7 +125,6 @@ class MainActivity : Activity() {
         } catch (e: Exception) {
             null
         }
-        loadStrengthRange()
         buildUi()
         if (cameraId != null) {
             cameraManager.registerTorchCallback(torchCallback, handler)
@@ -279,29 +270,10 @@ class MainActivity : Activity() {
         return fallback
     }
 
-    // ফোন টর্চের আলোর কতগুলো ধাপ সমর্থন করে তা জেনে নেয়; সংরক্ষিত মাত্রা (না থাকলে ফোনের ডিফল্ট) বসায়
-    private fun loadStrengthRange() {
-        val id = cameraId ?: return
-        if (Build.VERSION.SDK_INT < 33) return
-        try {
-            val ch = cameraManager.getCameraCharacteristics(id)
-            val max = ch.get(CameraCharacteristics.FLASH_INFO_STRENGTH_MAXIMUM_LEVEL) ?: 1
-            val def = ch.get(CameraCharacteristics.FLASH_INFO_STRENGTH_DEFAULT_LEVEL) ?: max
-            maxStrength = max
-            strength = stateSp().getInt("strength", def).coerceIn(1, max.coerceAtLeast(1))
-        } catch (e: Exception) {
-            maxStrength = 1
-        }
-    }
-
     private fun setTorch(on: Boolean) {
         val id = cameraId ?: return
         try {
-            if (on && maxStrength > 1 && Build.VERSION.SDK_INT >= 33) {
-                cameraManager.turnOnTorchWithStrengthLevel(id, strength)
-            } else {
-                cameraManager.setTorchMode(id, on)
-            }
+            cameraManager.setTorchMode(id, on)
         } catch (e: CameraAccessException) {
             fail()
         } catch (e: IllegalArgumentException) {
@@ -372,41 +344,6 @@ class MainActivity : Activity() {
         val pl = LinearLayout.LayoutParams(dp(210), dp(210))
         pl.gravity = Gravity.CENTER_HORIZONTAL
         root.addView(power, pl)
-
-        // বাটনের ঠিক নিচে: টেনে টর্চের আলো কমানো-বাড়ানোর স্লাইডার
-        brightLabel = TextView(this)
-        brightLabel.setTextColor(Color.parseColor("#C5CEDA"))
-        brightLabel.textSize = 14f
-        brightLabel.gravity = Gravity.CENTER
-        val bll = LinearLayout.LayoutParams(matchParent, wrapContent)
-        bll.topMargin = dp(20)
-        root.addView(brightLabel, bll)
-
-        brightBar = SeekBar(this)
-        val amberTint = ColorStateList.valueOf(Color.parseColor("#FFB703"))
-        brightBar.progressTintList = amberTint
-        brightBar.thumbTintList = amberTint
-        brightBar.progressBackgroundTintList = ColorStateList.valueOf(Color.parseColor("#2A3441"))
-        brightBar.max = (maxStrength - 1).coerceAtLeast(1)
-        brightBar.progress = if (maxStrength > 1) strength - 1 else 0
-        brightBar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-            override fun onProgressChanged(sb: SeekBar, progress: Int, fromUser: Boolean) {
-                if (!fromUser || maxStrength <= 1) return
-                strength = (progress + 1).coerceIn(1, maxStrength)
-                stateSp().edit().putInt("strength", strength).apply()
-                // স্থির মোডে জ্বলন্ত অবস্থায় সঙ্গে সঙ্গে আলো বদলায়; SOS/ঝলকে পরের ঝলক থেকে
-                if (active && mode == Mode.STEADY) setTorch(true)
-                refreshBrightLabel()
-            }
-
-            override fun onStartTrackingTouch(sb: SeekBar) {}
-            override fun onStopTrackingTouch(sb: SeekBar) {}
-        })
-        val bbl = LinearLayout.LayoutParams(matchParent, wrapContent)
-        bbl.topMargin = dp(8)
-        bbl.leftMargin = dp(24)
-        bbl.rightMargin = dp(24)
-        root.addView(brightBar, bbl)
 
         status = TextView(this)
         status.setTextColor(Color.parseColor("#8A97A8"))
@@ -491,17 +428,7 @@ class MainActivity : Activity() {
         setContentView(root)
     }
 
-    private fun refreshBrightLabel() {
-        brightLabel.text = if (maxStrength > 1) {
-            "আলো: ${strength * 100 / maxStrength}%"
-        } else {
-            "এই ফোনে টর্চের আলো কমানো-বাড়ানো সমর্থিত নয়"
-        }
-        brightBar.isEnabled = maxStrength > 1 && cameraId != null
-    }
-
     private fun refreshUi() {
-        refreshBrightLabel()
         val sp = stateSp()
         ver.text = "সংস্করণ ${Updater.curVer(this) - 100} · বাটন-ইভেন্ট: সরাসরি ${sp.getInt("diag_a11y", 0)}, মিডিয়া ${sp.getInt("diag_media", 0)}"
         val amber = Color.parseColor("#FFB703")
