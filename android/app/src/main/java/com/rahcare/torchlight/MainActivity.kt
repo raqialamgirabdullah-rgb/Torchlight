@@ -4,7 +4,13 @@ import android.app.Activity
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.app.PendingIntent
+import android.content.pm.PackageInstaller
 import android.graphics.Color
+import android.net.Uri
+import android.os.Build
+import java.net.HttpURLConnection
+import java.net.URL
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.hardware.camera2.CameraAccessException
@@ -95,6 +101,10 @@ class MainActivity : Activity() {
     }
 
     private lateinit var hint: TextView
+    private lateinit var updBtn: TextView
+    private var update: Updater.Info? = null
+    private var updBusy = false
+    private var pendingInstall = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -116,7 +126,91 @@ class MainActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
+        // "অজানা সোর্স" অনুমতি দিয়ে ফিরে এলে আপডেট নিজেই শুরু হয়
+        val u = update
+        if (pendingInstall && u != null && packageManager.canRequestPackageInstalls()) {
+            pendingInstall = false
+            install(u)
+        }
+        update = Updater.saved(this)
         refreshUi()
+        checkUpdate()
+    }
+
+    // নতুন সংস্করণ নিজে থেকে খোঁজে (অ্যাপ খুললে/ফিরলে); কোনো বোতাম চাপতে হয় না
+    private fun checkUpdate() {
+        val app = applicationContext
+        Thread {
+            val now = Updater.checkNow(app)
+            runOnUiThread {
+                if (isFinishing) return@runOnUiThread
+                update = now
+                refreshUi()
+            }
+        }.start()
+    }
+
+    // APK নামিয়ে PackageInstaller দিয়ে ইনস্টল করে; ফোন নিশ্চিত করার পর্দা দেখাবে
+    private fun install(u: Updater.Info) {
+        if (!packageManager.canRequestPackageInstalls()) {
+            pendingInstall = true
+            Toast.makeText(this, "পরের পর্দায় \"Allow from this source\" চালু করে ফিরে আসুন — আপডেট নিজেই শুরু হবে", Toast.LENGTH_LONG).show()
+            startActivity(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:$packageName")))
+            return
+        }
+        if (updBusy) return
+        updBusy = true
+        updBtn.text = "ডাউনলোড হচ্ছে… ০%"
+        Thread {
+            val inst = packageManager.packageInstaller
+            val p = PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL)
+            if (Build.VERSION.SDK_INT >= 31) p.setRequireUserAction(PackageInstaller.SessionParams.USER_ACTION_NOT_REQUIRED)
+            val id = inst.createSession(p)
+            try {
+                val s = inst.openSession(id)
+                val cn = URL(u.url).openConnection() as HttpURLConnection
+                cn.connectTimeout = 15000
+                cn.readTimeout = 30000
+                if (cn.responseCode != 200) throw Exception("HTTP ${cn.responseCode}")
+                val total = cn.contentLengthLong
+                cn.inputStream.use { ins ->
+                    s.openWrite("a", 0, -1).use { out ->
+                        val buf = ByteArray(32 * 1024)
+                        var done = 0L
+                        var last = -1
+                        while (true) {
+                            val n = ins.read(buf)
+                            if (n < 0) break
+                            out.write(buf, 0, n)
+                            done += n
+                            if (total > 0) {
+                                val pct = (done * 100 / total).toInt().coerceIn(0, 100)
+                                if (pct != last) {
+                                    last = pct
+                                    runOnUiThread { updBtn.text = "ডাউনলোড হচ্ছে… $pct%" }
+                                }
+                            }
+                        }
+                        s.fsync(out)
+                    }
+                }
+                val pi = PendingIntent.getBroadcast(
+                    this, id, Intent(this, UpdateReceiver::class.java),
+                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE
+                )
+                runOnUiThread { updBtn.text = "ইনস্টল হচ্ছে…" }
+                s.commit(pi.intentSender)
+                // ইনস্টল সফল হলে অ্যাপ নিজেই নতুন হয়ে চালু হবে; না হলে ৬০ সেকেন্ড পর বোতাম ফিরিয়ে আনি
+                handler.postDelayed({ updBusy = false; refreshUi() }, 60000L)
+            } catch (e: Exception) {
+                try { inst.abandonSession(id) } catch (x: Exception) {}
+                runOnUiThread {
+                    updBusy = false
+                    refreshUi()
+                    Toast.makeText(this, "আপডেট শুরু করা গেল না (${e.javaClass.simpleName}) — ইন্টারনেট দেখে আবার চেষ্টা করুন", Toast.LENGTH_LONG).show()
+                }
+            }
+        }.start()
     }
 
     private fun isKeyServiceEnabled(): Boolean {
@@ -269,6 +363,21 @@ class MainActivity : Activity() {
         hl.topMargin = dp(16)
         root.addView(hint, hl)
 
+        // নতুন সংস্করণ এলে শুধু তখনই এই বোতাম দেখায়
+        updBtn = TextView(this)
+        updBtn.textSize = 16f
+        updBtn.typeface = Typeface.DEFAULT_BOLD
+        updBtn.gravity = Gravity.CENTER
+        updBtn.setTextColor(Color.parseColor("#1A1200"))
+        updBtn.background = roundRect(Color.parseColor("#FFB703"), 14)
+        updBtn.setPadding(dp(12), dp(14), dp(12), dp(14))
+        updBtn.isClickable = true
+        updBtn.visibility = View.GONE
+        updBtn.setOnClickListener { val u = update; if (u != null && !updBusy) install(u) }
+        val ul = LinearLayout.LayoutParams(matchParent, wrapContent)
+        ul.topMargin = dp(12)
+        root.addView(updBtn, ul)
+
         setContentView(root)
     }
 
@@ -296,6 +405,15 @@ class MainActivity : Activity() {
             hint.text = "ভলিউম-ডাউন চেপে ধরে টর্চ চালাতে এখানে চাপ দিয়ে ফিচারটি চালু করুন"
             hint.setTextColor(amber)
             hint.background = roundRect(Color.parseColor("#1B2430"), 12)
+        }
+
+        if (update != null) {
+            updBtn.visibility = View.VISIBLE
+            if (!updBusy) {
+                updBtn.text = if (packageManager.canRequestPackageInstalls()) "নতুন সংস্করণ এসেছে — আপডেট করুন" else "আপডেটের অনুমতি দিন"
+            }
+        } else {
+            updBtn.visibility = View.GONE
         }
 
         for ((m, chip) in chips) {

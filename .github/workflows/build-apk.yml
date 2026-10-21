@@ -29,7 +29,9 @@ jobs:
       - name: Build release APK
         shell: bash
         working-directory: android
-        run: gradle --no-daemon --stacktrace assembleRelease 2>&1 | tee ../build.log
+        run: |
+          VC=$((100 + ${{ github.run_number }}))
+          gradle --no-daemon --stacktrace -Pvc=$VC assembleRelease 2>&1 | tee ../build.log
 
       - name: Publish APK to a GitHub Release
         if: success()

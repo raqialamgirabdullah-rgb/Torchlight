@@ -11,7 +11,7 @@ android {
         applicationId = "com.rahcare.torchlight"
         minSdk = 26
         targetSdk = 34
-        versionCode = 1
+        versionCode = (findProperty("vc") as String?)?.toIntOrNull() ?: 1
         versionName = "1.0"
     }
 
