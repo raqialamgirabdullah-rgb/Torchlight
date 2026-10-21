@@ -1,10 +1,16 @@
 package com.rahcare.torchlight
 
 import android.accessibilityservice.AccessibilityService
+import android.content.BroadcastReceiver
 import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraManager
+import android.media.AudioAttributes
+import android.media.AudioFormat
 import android.media.AudioManager
+import android.media.AudioTrack
 import android.os.Handler
 import android.os.Looper
 import android.os.PowerManager
@@ -45,6 +51,76 @@ class TorchKeyService : AccessibilityService() {
         }
     }
 
+    // স্ক্রিন অফ থাকলে অ্যান্ড্রয়েড ভলিউম বাটনের ইভেন্ট অ্যাপে পাঠায় না — যদি না কোনো মিউজিক/অডিও চালু থাকে।
+    // তাই স্ক্রিন অফ হলে নিঃশব্দ (silent) অডিও চালিয়ে রাখি; তখন বাটনের ইভেন্ট এই সার্ভিসে পৌঁছায়।
+    private var silentTrack: AudioTrack? = null
+    @Volatile private var silentRunning = false
+    private var silentThread: Thread? = null
+
+    private fun startSilentAudio() {
+        if (silentRunning) return
+        try {
+            val rate = 8000
+            val minBuf = AudioTrack.getMinBufferSize(
+                rate, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT
+            )
+            val size = maxOf(minBuf, 4096)
+            val track = AudioTrack.Builder()
+                .setAudioAttributes(
+                    AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_MEDIA)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+                        .build()
+                )
+                .setAudioFormat(
+                    AudioFormat.Builder()
+                        .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+                        .setSampleRate(rate)
+                        .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
+                        .build()
+                )
+                .setBufferSizeInBytes(size)
+                .setTransferMode(AudioTrack.MODE_STREAM)
+                .build()
+            track.play()
+            silentTrack = track
+            silentRunning = true
+            silentThread = Thread {
+                val zeros = ByteArray(size)
+                while (silentRunning) {
+                    val n = try { track.write(zeros, 0, zeros.size) } catch (e: Exception) { -1 }
+                    if (n < 0) break
+                }
+            }.also { it.isDaemon = true; it.start() }
+        } catch (e: Exception) {
+            silentRunning = false
+        }
+    }
+
+    private fun stopSilentAudio() {
+        silentRunning = false
+        try {
+            silentTrack?.stop()
+        } catch (e: Exception) {
+        }
+        try {
+            silentTrack?.release()
+        } catch (e: Exception) {
+        }
+        silentTrack = null
+        silentThread = null
+    }
+
+    private val screenReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            when (intent?.action) {
+                Intent.ACTION_SCREEN_OFF -> startSilentAudio()
+                Intent.ACTION_SCREEN_ON, Intent.ACTION_USER_PRESENT -> stopSilentAudio()
+            }
+        }
+    }
+    private var receiverRegistered = false
+
     private var pending = false
     private var longPressFired = false
 
@@ -68,10 +144,28 @@ class TorchKeyService : AccessibilityService() {
             null
         }
         if (cameraId != null) cameraManager.registerTorchCallback(torchCallback, handler)
+
+        if (!receiverRegistered) {
+            val f = IntentFilter().apply {
+                addAction(Intent.ACTION_SCREEN_OFF)
+                addAction(Intent.ACTION_SCREEN_ON)
+                addAction(Intent.ACTION_USER_PRESENT)
+            }
+            registerReceiver(screenReceiver, f)
+            receiverRegistered = true
+        }
+        // সার্ভিস চালু হওয়ার সময় স্ক্রিন আগেই অফ থাকলে
+        val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+        if (!pm.isInteractive) startSilentAudio()
     }
 
     override fun onUnbind(intent: android.content.Intent?): Boolean {
         handler.removeCallbacks(longPress)
+        stopSilentAudio()
+        if (receiverRegistered) {
+            try { unregisterReceiver(screenReceiver) } catch (e: Exception) {}
+            receiverRegistered = false
+        }
         if (cameraId != null) cameraManager.unregisterTorchCallback(torchCallback)
         return super.onUnbind(intent)
     }
