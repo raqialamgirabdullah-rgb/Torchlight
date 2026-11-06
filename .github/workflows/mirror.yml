@@ -1,0 +1,17 @@
+name: Mirror latest release
+on: workflow_dispatch
+permissions:
+  contents: write
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Copy latest release from alamgirabdullahgh/Torchlight
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG=$(gh release view -R alamgirabdullahgh/Torchlight --json tagName -q .tagName)
+          mkdir a && gh release download "$TAG" -R alamgirabdullahgh/Torchlight -D a --pattern '*.apk'
+          ls -la a
+          gh release delete "$TAG" -R ${{ github.repository }} --yes --cleanup-tag 2>/dev/null || true
+          gh release create "$TAG" a/* -R ${{ github.repository }} --title "$TAG" --notes "এই রিপো শুধু পুরনো অ্যাপ আপডেটের সেতু। এই APK একবার ইনস্টল করলে এরপর আপডেট আসবে alamgirabdullahgh/Torchlight থেকে।" --latest
